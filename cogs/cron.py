@@ -1,5 +1,7 @@
+from datetime import time
 import logging
-import sqlite3
+import aiosqlite
+from timeit import default_timer as timer
 from disnake import Client
 from disnake.ext import tasks
 from disnake.ext import commands
@@ -8,26 +10,28 @@ from disnake.ext import commands
 logger = logging.getLogger("bot")
 
 class Cron(commands.Cog):
-    def __init__(self, bot: Client, db: sqlite3.Connection):
-        self.index = 0
+    def __init__(self, bot: Client):
         self.bot = bot
-        self.db = db
-        self.cursor = self.db.cursor()
         self.check_sales.start()
+        self.run_at = time(10)
 
     def cog_unload(self):
         self.check_sales.cancel()
 
-    def getTimeUntilTomorrow() -> int:
-        return 10
-
-    @tasks.loop(seconds=getTimeUntilTomorrow())
+    @tasks.loop(seconds=5)
     async def check_sales(self):
-        for row in self.cursor.execute("SELECT game_id, channel FROM games"):
-            game = row[0]
-            channel_id = row[1]
-            channel = await self.bot.fetch_channel(channel_id)
-            if channel:
-                await channel.send(game)
-        self.index += 1
-        logger.info(f"{self.index} seconds")
+        start = timer()
+        async with aiosqlite.connect("db.sqlite3") as conn:
+            async with conn.execute("SELECT game_id, channel FROM games") as cursor:
+                async for row in cursor:
+                    game = row[0]
+                    channel_id = row[1]
+                    channel = await self.bot.fetch_channel(channel_id)
+                    if channel:
+                        await channel.send(game)
+        end = timer()
+        logger.info(f"check_sales took {end-start}")
+
+    @check_sales.before_loop
+    async def before_check_sales(self):
+        await self.bot.wait_until_ready()
